@@ -4,13 +4,17 @@ import re
 from glob import glob
 
 import en_core_web_sm
+import pandas as pd
 import numpy as np
+import nltk
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import classification_report
 from sklearn.svm import SVC
 from tqdm import tqdm
+import argparse
 
+nltk.download('stopwords')
 
 def clean_text(review, stopwords):
     review = review.lower()  # to lowercase
@@ -49,8 +53,14 @@ def preprocess_text(
         if not test:
             label = os.path.basename(os.path.dirname(path))
             labels.append(label)
-
-    return (preprocessed_texts, labels) if not test else preprocessed_texts
+    
+    file_names = [os.path.basename(path) for path in paths]
+    if not test:
+        df = pd.DataFrame({"file_names": file_names, "preprocessed_texts": preprocessed_texts, "labels": labels})
+    else:
+        df = pd.DataFrame({"file_names": file_names, "preprocessed_texts": preprocessed_texts})
+    # return (preprocessed_texts, labels) if not test else preprocessed_texts
+    return df
 
 
 def validate_classifier(model, X_val, y_val):
@@ -70,24 +80,33 @@ def save_predictions(predictions, output_path):
 
 # Run the main function
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Code for classification text')
+    parser.add_argument('--train', type=str, help='Path to train data folder')
+    parser.add_argument('--val', type=str, help='Path to validation data folder')
+    parser.add_argument('--test', type=str, help='Path to test data folder')
+    parser.add_argument('--prediction', type=str, help='Path to save predictions', 
+                        required=False, default=os.path.join(os.getcwd(), "predictions.txt"))
+    args = parser.parse_args()
+
+
     lemmatizer = en_core_web_sm.load()
     stop = set(stopwords.words("english"))
 
     # Step 1: Preprocessing data
     print("Step 1: Preprocessing data")
-    X_train, y_train = preprocess_text(
-        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/train",
+    df_train = preprocess_text(
+        path_to_folder=args.train,
         stopwords=stop,
         lemmatizer=lemmatizer,
         shuffle=True,
     )
-    X_val, y_val = preprocess_text(
-        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/validat",
+    df_val = preprocess_text(
+        path_to_folder=args.val,
         stopwords=stop,
         lemmatizer=lemmatizer,
     )
-    X_test = preprocess_text(
-        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/test",
+    df_test = preprocess_text(
+        path_to_folder=args.test,
         stopwords=stop,
         lemmatizer=lemmatizer,
         test=True,
@@ -97,29 +116,30 @@ if __name__ == "__main__":
     vectorizer = TfidfVectorizer(
         ngram_range=(1, 3), min_df=0.01, max_df=0.8, max_features=10000
     )
-    X_train_features = vectorizer.fit_transform(X_train).todense()
-    X_val_features = vectorizer.transform(X_val).todense()
-    X_test_features = vectorizer.transform(X_test).todense()
+    X_train_features = vectorizer.fit_transform(df_train["preprocessed_texts"]).todense()
+    X_val_features = vectorizer.transform(df_val["preprocessed_texts"]).todense()
+    X_test_features = vectorizer.transform(df_test["preprocessed_texts"]).todense()
 
     # Step 2: Training a linear classifier
     print("Step 2: Training a linear classifier")
     model = SVC()
-    model.fit(np.asarray(X_train_features), y_train)
+    model.fit(np.asarray(X_train_features), df_train["labels"])
 
     # Step 3: Validate the model performance
     print("Step 3: Validate the model performance")
-    validate_classifier(model, X_val_features, y_val)
+    validate_classifier(model, X_val_features, df_val["labels"])
 
     # Optional: Tune the model if validation results are not satisfactory
 
     # Step 4: Test the model
     print("Step 4: Test the model")
     predictions = test_classifier(model, X_test_features)
+    df_test["predictions"] = predictions
+    
 
     # Step 5: Save the predictions
     print("Step 5: Save the predictions")
-    save_predictions(
-        predictions, "/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/predictions.txt"
-    )
-
-    # Additional: Write a report documenting your process and findings
+    df_test[["file_names", "predictions"]].to_csv(args.prediction, sep='\t', index=False)
+    # save_predictions(
+    #     predictions, args.prediction
+    # )
