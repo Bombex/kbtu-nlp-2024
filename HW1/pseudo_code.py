@@ -1,48 +1,125 @@
-# Pseudo code for the text classification task
-import your_choice_of_library
+import os
+import random
+import re
+from glob import glob
 
-def preprocess_text(data_path):
-    # Implement text preprocessing, such as tokenization, vectorization, etc.
-    pass
+import en_core_web_sm
+import numpy as np
+from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics import classification_report
+from sklearn.svm import SVC
+from tqdm import tqdm
 
-def train_linear_classifier(X_train, y_train):
-    # Implement training of linear classifier
-    pass
+
+def clean_text(review, stopwords):
+    review = review.lower()  # to lowercase
+    review = re.sub("[^a-zA-Z ]+", "", review)  # delete punctuation
+    review = " ".join([word for word in review.split() if word not in stopwords])
+
+    return review
+
+
+def lemmatize_text(text, lemmatizer):
+    spacy_results = lemmatizer(text)
+    return " ".join([token.lemma_ for token in spacy_results])
+
+
+def preprocess_text(
+    path_to_folder: str,
+    stopwords,
+    lemmatizer,
+    pattern: str = "**/*.txt",
+    test: bool = False,
+    shuffle: bool = False,
+):
+    preprocessed_texts, labels = [], []
+    if test:
+        pattern = "*.txt"
+    paths = glob(os.path.join(path_to_folder, pattern))
+    if shuffle:
+        random.shuffle(paths)
+    for path in tqdm(paths):
+        with open(path, "r") as file:
+            text = file.readline().strip()
+            cleaned_text = clean_text(text, stopwords)
+            lemmatized_text = lemmatize_text(cleaned_text, lemmatizer)
+            preprocessed_texts.append(lemmatized_text)
+
+        if not test:
+            label = os.path.basename(os.path.dirname(path))
+            labels.append(label)
+
+    return (preprocessed_texts, labels) if not test else preprocessed_texts
+
 
 def validate_classifier(model, X_val, y_val):
-    # Test the classifier on validation set
-    pass
+    print(classification_report(y_val, model.predict(np.asarray(X_val))))
+
 
 def test_classifier(model, X_test):
-    # Make predictions with the trained model on test set
-    pass
+    y_test = model.predict(np.asarray(X_test))
+    return y_test
+
 
 def save_predictions(predictions, output_path):
-    # Save the predictions to a file
-    pass
+    with open(output_path, "w") as f:
+        for item in predictions:
+            f.write("%s\n" % item)
 
-def main():
+
+# Run the main function
+if __name__ == "__main__":
+    lemmatizer = en_core_web_sm.load()
+    stop = set(stopwords.words("english"))
+
     # Step 1: Preprocessing data
-    X_train, y_train = preprocess_text("path/to/train/your_chosen_category/")
-    X_val, y_val = preprocess_text("path/to/validation/your_chosen_category/")
-    X_test = preprocess_text("path/to/test/")
+    print("Step 1: Preprocessing data")
+    X_train, y_train = preprocess_text(
+        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/train",
+        stopwords=stop,
+        lemmatizer=lemmatizer,
+        shuffle=True,
+    )
+    X_val, y_val = preprocess_text(
+        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/validat",
+        stopwords=stop,
+        lemmatizer=lemmatizer,
+    )
+    X_test = preprocess_text(
+        path_to_folder="/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/test",
+        stopwords=stop,
+        lemmatizer=lemmatizer,
+        test=True,
+    )
+
+    # Step 1.1: Create vectors
+    vectorizer = TfidfVectorizer(
+        ngram_range=(1, 3), min_df=0.01, max_df=0.8, max_features=10000
+    )
+    X_train_features = vectorizer.fit_transform(X_train).todense()
+    X_val_features = vectorizer.transform(X_val).todense()
+    X_test_features = vectorizer.transform(X_test).todense()
 
     # Step 2: Training a linear classifier
-    model = train_linear_classifier(X_train, y_train)
+    print("Step 2: Training a linear classifier")
+    model = SVC()
+    model.fit(np.asarray(X_train_features), y_train)
 
     # Step 3: Validate the model performance
-    validate_classifier(model, X_val, y_val)
+    print("Step 3: Validate the model performance")
+    validate_classifier(model, X_val_features, y_val)
 
     # Optional: Tune the model if validation results are not satisfactory
 
     # Step 4: Test the model
-    predictions = test_classifier(model, X_test)
+    print("Step 4: Test the model")
+    predictions = test_classifier(model, X_test_features)
 
     # Step 5: Save the predictions
-    save_predictions(predictions, "path/to/output/predictions.txt")
+    print("Step 5: Save the predictions")
+    save_predictions(
+        predictions, "/home/akeresh/Desktop/kbtu/kbtu-nlp-2024/HW1/data/predictions.txt"
+    )
 
     # Additional: Write a report documenting your process and findings
-
-# Run the main function
-if __name__ == "__main__":
-    main()
